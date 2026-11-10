@@ -5,7 +5,9 @@ import hmac
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, quote_plus
+from urllib.parse import urlparse, parse_qs, quote_plus, quote, urlencode
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 from core.brain import chat, history, clear_history
 from tools.agent_tools import (
@@ -514,6 +516,48 @@ textarea#message:focus {
  0%,100%{transform:scale(1);filter:hue-rotate(0deg)}
  50%{transform:scale(1.08);filter:hue-rotate(35deg) brightness(1.4)}
 }
+
+/* VERNTY IMAGE STUDIO */
+.image-studio textarea {
+ min-height:105px;resize:vertical;
+ background:#090f1a;color:white;
+ border:1px solid #293d55;border-radius:13px;
+ padding:14px;width:100%;margin:8px 0;
+}
+.image-options {
+ display:grid;grid-template-columns:1fr 1fr;gap:10px;
+}
+.image-options label {
+ display:block;color:var(--muted);font-size:12px;
+}
+.image-options select {
+ width:100%;padding:12px;margin-top:6px;
+ border-radius:10px;background:#090f1a;
+ border:1px solid #293d55;color:white;
+}
+.image-studio button {
+ width:100%;margin-top:12px;
+ background:linear-gradient(135deg,#075c78,#123d69);
+ border:1px solid var(--cyan);
+}
+#imageStatus {
+ color:var(--muted);font-size:12px;
+ margin:12px 0;overflow-wrap:anywhere;
+}
+#imagePreview {
+ display:none;width:100%;height:auto;
+ max-height:650px;object-fit:contain;
+ border-radius:14px;border:1px solid var(--border);
+ margin-top:12px;background:#090f1a;
+}
+#downloadImage {
+ display:none;text-align:center;margin-top:12px;
+ color:var(--cyan);font-weight:bold;
+}
+@media(max-width:420px) {
+ .image-options{grid-template-columns:1fr}
+}
+
 </style>
 
 <link rel="manifest" href="/manifest.json">
@@ -564,6 +608,52 @@ textarea#message:focus {
   <button onclick="readLast()">🔊 Read reply</button>
  </div>
  <p id="voiceStatus">Voice assistant ready to use.</p>
+</section>
+
+
+<section class="ai-panel image-studio" id="image-studio">
+ <div class="ai-panel-title">
+  <b>🎨 VERNTY IMAGE STUDIO</b>
+  <small>AI IMAGE GENERATOR</small>
+ </div>
+
+ <p><small>Describe the image you want VERNTY to create.</small></p>
+
+ <textarea id="imagePrompt"
+  maxlength="1200"
+  placeholder="Example: A futuristic African city at sunset, cinematic lighting, ultra detailed..."></textarea>
+
+ <div class="image-options">
+  <label>Image style
+   <select id="imageStyle">
+    <option>Photorealistic</option>
+    <option>Cinematic</option>
+    <option>Anime</option>
+    <option>Digital art</option>
+    <option>3D</option>
+   </select>
+  </label>
+
+  <label>Aspect ratio
+   <select id="imageRatio">
+    <option value="1:1">Square (1:1)</option>
+    <option value="16:9">Landscape (16:9)</option>
+    <option value="9:16">Portrait (9:16)</option>
+   </select>
+  </label>
+ </div>
+
+ <button id="generateImageButton" onclick="generateImage()">
+  ✨ Generate image
+ </button>
+
+ <p id="imageStatus">Ready to create.</p>
+
+ <img id="imagePreview" alt="Your generated image">
+
+ <a id="downloadImage" href="#" download="vernty-image.png">
+  ⬇ Download generated image
+ </a>
 </section>
 
 <section class="ai-panel">
@@ -701,6 +791,57 @@ function listen(){
  rec.onend=()=>setOrbState("idle");
  rec.start();
 }
+
+async function generateImage(){
+ const prompt=document.getElementById("imagePrompt").value.trim();
+ const status=document.getElementById("imageStatus");
+ const button=document.getElementById("generateImageButton");
+ const preview=document.getElementById("imagePreview");
+ const download=document.getElementById("downloadImage");
+
+ if(!prompt){
+  status.textContent="Please describe the image first.";
+  return;
+ }
+
+ button.disabled=true;
+ button.textContent="⏳ Creating image...";
+ status.textContent="Connecting to VERNTY IMAGE STUDIO...";
+ preview.style.display="none";
+ download.style.display="none";
+
+ try{
+  const response=await fetch("/api/image",{
+   method:"POST",
+   headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({
+    prompt:prompt,
+    style:document.getElementById("imageStyle").value,
+    ratio:document.getElementById("imageRatio").value
+   })
+  });
+
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||"Image generation failed.");
+  if(!data.image)throw new Error("No image was returned.");
+
+  preview.src=data.image;
+  preview.style.display="block";
+  download.href=data.image;
+  download.download="vernty-image."+
+   (data.mime==="image/png"?"png":
+    data.mime==="image/webp"?"webp":"jpg");
+  download.style.display="block";
+  status.textContent="Image created successfully.";
+ }catch(error){
+  status.textContent="Image generation failed: "+error.message;
+ }finally{
+  button.disabled=false;
+  button.textContent="✨ Generate image";
+ }
+}
+
+
 async function init(){
  try{
   const r=await fetch("/api/history");const data=await r.json();
@@ -816,6 +957,142 @@ self.addEventListener("fetch", event => {
 """
 
 
+
+def generate_image(prompt, style="Photorealistic", ratio="1:1"):
+    api_key = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+
+    if not api_key or not account_id:
+        raise RuntimeError(
+            "Cloudflare image AI is not configured. "
+            "Check CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID "
+            "in your server environment."
+        )
+
+    prompt = str(prompt).strip()
+    if not prompt:
+        raise ValueError("Please enter an image description.")
+    if len(prompt) > 1200:
+        raise ValueError("Image description must be 1200 characters or less.")
+
+    styles = {
+        "Photorealistic": "Photorealistic, highly detailed photography",
+        "Cinematic": "Cinematic lighting, dramatic composition, film still",
+        "Anime": "High quality anime illustration",
+        "Digital art": "Professional digital artwork, detailed illustration",
+        "3D": "High quality 3D render, detailed materials and lighting",
+    }
+
+    dimensions = {
+        "1:1": (1024, 1024),
+        "16:9": (1280, 720),
+        "9:16": (720, 1280),
+    }
+
+    if style not in styles:
+        raise ValueError("Please choose a supported image style.")
+    if ratio not in dimensions:
+        raise ValueError("Please choose a supported image format.")
+
+    width, height = dimensions[ratio]
+    full_prompt = styles[style] + ". " + prompt
+
+    url = (
+        "https://api.cloudflare.com/client/v4/accounts/"
+        + account_id
+        + "/ai/run/@cf/black-forest-labs/flux-1-schnell"
+    )
+
+    payload = json.dumps({
+        "prompt": full_prompt,
+        "width": width,
+        "height": height,
+    }).encode("utf-8")
+
+    request = Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json, image/*",
+            "User-Agent": "VERNTY-ONE/3.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=180) as response:
+            content_type = response.headers.get(
+                "Content-Type", ""
+            ).split(";")[0].strip().lower()
+
+            response_bytes = response.read(16 * 1024 * 1024 + 1)
+
+        if len(response_bytes) > 16 * 1024 * 1024:
+            raise RuntimeError("Cloudflare returned an image that is too large.")
+
+        if content_type.startswith("image/"):
+            image_bytes = response_bytes
+            mime = content_type
+        else:
+            result_data = json.loads(response_bytes.decode("utf-8"))
+            result = result_data.get("result") or {}
+
+            if not result_data.get("success", True):
+                errors = result_data.get("errors") or []
+                detail = errors[0].get("message", "") if errors else ""
+                raise RuntimeError(
+                    "Cloudflare image generation failed. "
+                    + (str(detail)[:300] if detail else "Check your Cloudflare settings.")
+                )
+
+            encoded = result.get("image") if isinstance(result, dict) else result
+
+            if not encoded:
+                raise RuntimeError("Cloudflare did not return an image.")
+
+            if encoded.startswith("data:"):
+                mime = encoded.split(";", 1)[0].split(":", 1)[1]
+                encoded = encoded.split(",", 1)[1]
+            else:
+                mime = "image/png"
+
+            image_bytes = base64.b64decode(encoded, validate=True)
+
+        if not image_bytes:
+            raise RuntimeError("Cloudflare returned an empty image.")
+
+        if len(image_bytes) > 8 * 1024 * 1024:
+            raise RuntimeError("Generated image is too large to display.")
+
+        return {
+            "image": "data:" + mime + ";base64,"
+                     + base64.b64encode(image_bytes).decode("ascii"),
+            "mime": mime,
+        }
+
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            raise RuntimeError(
+                "Cloudflare rejected the API token. Check its Workers AI permissions."
+            ) from None
+
+        raise RuntimeError(
+            "Cloudflare returned HTTP " + str(exc.code)
+            + ". Check your account, permissions and AI availability."
+        ) from None
+
+    except URLError:
+        raise RuntimeError(
+            "Could not connect to Cloudflare. Check your server connection."
+        ) from None
+
+    except (ValueError, KeyError, TypeError):
+        raise RuntimeError(
+            "Cloudflare returned an invalid image response."
+        ) from None
+
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, data, status=200):
         raw = json.dumps(data).encode("utf-8")
@@ -913,6 +1190,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/chat":
                 reply = chat(data.get("message", ""))
                 self.send_json({"reply": reply})
+                return
+
+            if path == "/api/image":
+                result = generate_image(
+                    data.get("prompt", ""),
+                    data.get("style", "Photorealistic"),
+                    data.get("ratio", "1:1"),
+                )
+                self.send_json(result)
                 return
 
             if path == "/api/tool" and os.environ.get("VERNTY_CLOUD") != "1":
