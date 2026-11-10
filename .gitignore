@@ -1,0 +1,39 @@
+# Secrets and configuration
+.env
+.env.*
+!.env.example
+memory/
+configure.py
+
+# Python temporary files
+__pycache__/
+*.py[cod]
+
+# Databases and local data
+*.db
+*.sqlite
+*.sqlite3
+
+# Backups
+backups/
+*.backup*
+*.safe-backup*
+*.working-backup*
+*.voice-backup*
+*.before-*
+*.pre-redesign*
+
+# Local workspaces and models
+workspace/
+models/
+.venv/
+venv/
+
+# Development helper scripts
+inspect_cloud.py
+fix_*.py
+install_*.py
+upgrade_*.py
+
+# Logs
+*.log
